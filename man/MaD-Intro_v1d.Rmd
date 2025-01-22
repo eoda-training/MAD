@@ -1,0 +1,726 @@
+---
+title: "Towards a New IWH Macro Data Infrastructure"
+author: "IWH Macroeconomic Department"
+date: "`r format(Sys.Date(), "%d.%m.%Y")`"
+output:
+  pdf_document: default
+  html_document: null
+bibliography: MaD-Lit.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+rm(list=ls())
+
+# File Location -----
+# Get current file name with path from RStudio environment
+FileName <- rstudioapi::getSourceEditorContext()$path
+# Strip off the file name from the path
+DirName <- dirname(FileName)
+# Set working directory to directory of this file
+setwd(DirName)
+
+# Auxiliary Functions -----
+colorize <- function(x, color) {
+  if (knitr::is_latex_output()) {
+    sprintf(x)
+    # sprintf("\\textcolor{%s}{%s}", color, x)
+  } else if (knitr::is_html_output()) {
+    sprintf("<span style='color: %s;'>%s</span>", color,
+      x)
+  } else x
+}
+
+addtolist <- function(mylist, myvalue, mykey){
+  mylist[[mykey]] <- myvalue
+  return(mylist)
+}
+```
+
+`r colorize("**This document is for internal use only. Do not distribute it outside IWH!**", "red")`
+
+# Introduction
+## Why a New Data Infrastructure?
+The current data infrastructure of the Macroeconomics Department is out-of-date.
+
+* Data is stored in multiple Excel files in multiple directories, sometimes even in personal directories which cannot be accessed by others.
+* It is difficult to use various vintages of data.
+* Many data sets are linked in Excel which is a possible source of errors.
+
+The new data infrastructure will be used to improve the efficiency of the forecasting workflow and to make actual data and forecasts available for research.
+
+## What Should the New Infrastructre Do?
+**Criteria** that a new infrastructure should fulfill are:
+
+* Transparency (well documented)
+* Easy access and search for variables
+* Avoid double work and redundancies (shared data)
+* Extendibility
+* Accessibility (also on non-IWH computers)
+* Compatible with any statistical or econometric software
+* Combine external data sources and IWH data (previous forecasts, e.g.)
+* Real-time functionality
+* Local storage of essential data (national accounts, business cycle indicators)
+* Reproducibility
+* Simulation environment: various alternative model solutions
+* Main functionality with free software (like R)
+
+## Prerequisites
+### R
+A basic understanding of R is required. A good introduction is @GrolemundWickham2016.
+
+#### R-Studio
+RStudio ([www.rstudio.com](https://www.rstudio.com)) offers a convenient environment to work with R. RStudio is free software and can be downloaded and used on private computers. It is available on the IWHSNC server.
+
+#### R Packages
+Functions for many purposes are provided as *packages*. These packages must be installed and loaded before the functions can be used. The command for loading a package is library().
+
+Packages that are used very often for data management and analysis are:
+
+* tidyverse
+* lubridate
+* readxl
+* scales
+* zoo
+* utils
+
+```{r packages, message=FALSE, warning=FALSE, results='hide'}
+library(tidyverse)
+library(lubridate)
+library(readxl)
+library(scales)
+library(zoo)
+library(utils)
+```
+
+#### Additional Beginner's Resources
+
+* @ZuurIenoMeesters2009
+
+# Database Structure and Storage
+## Main Principles
+The basic item of the **IWH Macroeconomic Database (IWH-MaD)** is an *observation* of a *variable*. 
+
+Variables are organized in a table `r colorize("tab_variables", "blue")` with columns:
+
+* `r colorize("var_id", "blue")`: the primary key
+* `r colorize("var_porperties", "blue")`: a *named list*
+    + var_name: English (short) name of the variable, used in tables and figures
+    + var_dename: German (short) name of the variable
+    + var_description
+    + var_dedescription
+    + var_units
+    + var_currency
+    + var_dimension
+    + var_baseyear
+    + var_aggregation
+    + var_originalsource
+    + var_sourcekey
+
+The table `r colorize("tab_observations", "blue")` has the following columns:
+
+* `r colorize("var_id", "blue")`
+* `r colorize("obs_value:", "blue")` the value
+* `r colorize("obs_time:", "blue")` the date and frequency to which the value refers stored in a *named list* with elements
+    + `r colorize("obs_date", "blue")`
+* `r colorize("obs_vintage", "blue")`: the vintage date
+* `r colorize("obs_update", "blue")`: the date of last change
+* `r colorize("obs_flag", "blue")`
+* `r colorize("obs_mod", "blue")`: a string indicating the *owner* (necessary to distinguish between local user-specific and central data)
+* `r colorize("obs_trans", "blue")`
+    + none (X)
+    + log (L)
+    + year-on-year percentage change (Y)
+    + percentage change (C)
+
+The data format for a table is a **tibble** (similar to a dataframe). The tables are stored in *rds*-files (a native R file format which compresses data and cannot be read by other software). From R, data can easily be stored in *csv*-files which can be imported into other software.^[Date is not directly stored as csv-files because it is not *tidy* but hierarchical: Some fields contain a variable number of elements in lists.] Tibbles can be created with tibble() or tribble(). Tables imported from csv or Excel file are also tibbles.
+
+##### `r colorize("Example:", "green")` Industrial Production from Bundesbank {-}
+```{r exmpl_ip_de_sa_00}
+tab_variables <- tribble(
+  ~var_id, ~var_properties,
+  "IP_SA_DE", list(var_sourcekey="BBDE1.M.DE.Y.BAA1.A2P000000.G.C.I15.A",
+                   var_name="Production"),
+  "IPIND_SA_DE", list(var_sourcekey="BBDE1.M.DE.Y.BAA1.A2P300000.G.C.I15.A")
+)
+
+print(tab_variables)
+```
+
+## Structure of the Primary Key var_id
+The primary key var_id identifies the variable. It consists of at least six segments separated by a underscore (_). The segments are:
+
+(@) Mnemonic: a short string like GDP, CONS, INV, IP, ...
+(@) Frequency:
+    + daily (D)
+    + weekly, 7 days (W)
+    + weekly, 5 days (V)
+    + monthly (M)
+    + quarterly (Q)
+    + bi-annual (B)
+    + yearly (Y)
+(@) Price-adjustment identifier (see above)
+    + no adjustment (X)
+    + current prices (C)
+    + price-adjusted, chain-linked, normalized to 100 (L)
+    + volume  (V)
+    + unchained volume (U)
+    + deflator (P)
+(@) Seasonal adjustment
+    + no adjustment (X)
+    + seasonally and calendar adjusted (ARIMA-13) (A)
+    + seasonally and calendar adjusted (BV4) (B)
+    + seasonally adjusted (ARIMA-13) (S)
+    + seasonally adjusted (BV4) (V)
+    + calendar adjusted (C)
+    + season factors (F)
+    + calendar factors (T)
+(@) Type
+    + actual value (A)
+    + point forecast (F)
+(@) Source: the src_id, see below
+(@) Country: ISO country code (2-digit), see https://en.wikipedia.org/wiki/List_of_ISO_3166_country_codes 
+
+DE - Germany (since 1991)
+DC - Germany (chained before 1991 and after)
+DW - West Germany (before 1991)
+
+If necessary, var_id can be extended by additional segments, referring to a subregion of a country (NUTS 2, NUTS 3, ...) or to various currencies, e.g.
+
+Where needed, the var_id segments can be added as elements to var_properties (var_priceadj, var_seasadj, var_type, src_id). 
+
+## Database Meta Data
+Meta data is stored in an Exel file `r colorize("MaD-Meta.xlsx", "blue")`. This file contains the following sheets (columns below sheet name, respectively):
+
+* `r colorize("tab_sources", "blue")`: information on data sources
+  + src_id (primary key)
+  + src_name
+  + src_dename
+* `r colorize("tab_keys", "blue")`: information on data sources
+  + var_id (primary key)
+  + var_name
+  + var_dename
+  + var_sourcekey
+* `r colorize("tab_countries", "blue")`: information on countries
+    + cnt_code2: 2-digit ISO country code (primary key)
+    + cnt_name: English (short) name of country, used in standard work, in many cases the official name of country
+    + cnt_fullname: English full (official) name of country (United Kingdom of Great Britain and Northern Ireland, e.g.)
+    + cnt_code3: 3-digit country code
+    + cnt_dscode: Datastream country code (BD for Germany, e.g.)
+    + cnt_eucode: Eurostat country code (EL for Greece, e.g.)
+    + cnt_dename: German (short) name of country
+    + cnt_defullname: German full name of country
+    + cur_iso: main national currency
+* `r colorize("tab_currencies", "blue")`: information on currencies
+    + cur_iso: 3-digit currency code (primary key)
+    + cur_name
+    + cur_dename
+    
+```{r load_metadata}
+tab_countries <- read_excel("MaD_Meta_v2.xlsx", sheet = "tab_countries")
+```
+
+# Downloading Data
+Data sets come from various sources. Data should be downloaded automatically whenever possible.
+
+## Standard Sources
+### Bundesbank
+Bundesbank data can be downloaded via a specific URL which contains the time series key and additional information. Detailed information can be found on the [here](https://www.bundesbank.de/en/statistics/time-series-databases/help-for-sdmx-web-service).
+
+##### `r colorize("Example (continued):", "green")` Industrial Production from Bundesbank {-}
+```{r exmpl_ip_de_sa_01}
+SourceKeys <- tab_variables %>% 
+  mutate(var_sourcekey = map_chr(var_properties, "var_sourcekey")) %>% 
+  select(-var_properties)
+
+Bbk.Untidy <- NULL
+for (key in SourceKeys$var_sourcekey){
+  url <- paste("https://www.bundesbank.de/statistic-rmi/StatisticDownload?tsId=",
+               key,
+               "&mode=its&its_csvFormat=en&its_currency=default&its_dateFormat=default&its_from=&its_to=",  sep="")
+   Bbk.Series <- read.csv(url, encoding="UTF-8", na.strings = c("."), skip=4,
+                          col.names = c("Date", "Value", "Flag")) %>% 
+    filter(Date != "") %>%
+    mutate(Value = as.numeric(Value),
+           VarName = SourceKeys$var_id[SourceKeys$var_sourcekey==key])
+  Bbk.Untidy <- rbind(Bbk.Untidy, Bbk.Series)
+}
+```
+
+##### Main Bundesbank Data {-}
+The source keys for Bundesbank data are stored in SourceKeys.csv in ./DataSources/Bundesbank.
+
+```{r bbk_main, eval=FALSE}
+# Functions needed for data setup
+createpropertylist <- function(mysourcekey){
+  list(var_sourcekey=mysourcekey)
+}
+
+createdatelist <- function(myfrequency, mydate){
+  mylist <- list(obs_frequency=myfrequency)
+  if (myfrequency=="m"){
+    mylist[["obs_date"]] <- as.yearmon(mydate)
+  } else if (myfrequency=="q"){
+    mylist[["obs_date"]] <- as.yearqtr(str_replace(str_replace(str_replace(mydate,"-04","-02"),"-07","-03"),"-10","-04"))
+  } else if (myfrequency=="d"){
+    mylist[["obs_date"]] <- as.Date(mydate)
+  } else {
+    mylist[["obs_date"]] <- NA
+  }
+  return(mylist)
+}
+
+# Load source keys
+FileName <- paste(Root,"DataSources/Bundesbank/SourceKeys.csv", sep="")
+tab_variables.tidy <- read.csv(FileName)
+
+# Download data from Bundesbank website  
+Bbk.Untidy <- NULL
+Bbk.Descriptions <- NULL
+for (key in tab_variables.tidy$var_sourcekey){
+  # English description
+  url <- paste("https://www.bundesbank.de/statistic-rmi/StatisticDownload?tsId=",
+               key,
+               "&mode=its&its_csvFormat=en&its_currency=default&its_dateFormat=default&its_from=&its_to=", sep="")
+  Bbk.Description.Untidy <- read.csv(url, encoding="UTF-8", na.strings = c("."), nrows=4) %>% 
+    select(-ends_with("FLAGS"))
+  Bbk.Description.Untidy[1,1] <- "var_description"
+  Bbk.Description.EN <- Bbk.Description.Untidy %>%
+    gather(key = var_sourcekey, value = value, 2:ncol(Bbk.Description.Untidy)) %>% 
+    spread_(key = names(Bbk.Description.Untidy)[1],value = 'value') %>% 
+    select(var_sourcekey, var_description, LastUpdate = `last update`, var_unit = unit, var_unitmultiplier = `unit multiplier`)
+  
+  # German description
+  url <- paste("https://www.bundesbank.de/statistic-rmi/StatisticDownload?tsId=",
+               key,
+               "&mode=its&its_csvFormat=de&its_currency=default&its_dateFormat=default&its_from=&its_to=", sep="")
+  Bbk.Description.Untidy <- read.csv2(url, encoding="UTF-8", na.strings = c("."), nrows=4) %>% 
+    select(-ends_with("FLAGS"))
+  Bbk.Description.Untidy[1,1] <- "var_dedescription"
+  Bbk.Description.DE <- Bbk.Description.Untidy %>%
+    gather(key = var_sourcekey, value = value, 2:ncol(Bbk.Description.Untidy)) %>% 
+    spread_(key = names(Bbk.Description.Untidy)[1],value = 'value') %>% 
+    select(var_sourcekey, var_dedescription)
+  
+  Bbk.Description <- left_join(Bbk.Description.EN, Bbk.Description.DE, by = "var_sourcekey")
+  Bbk.Descriptions <- rbind(Bbk.Descriptions, Bbk.Description)
+  
+  # Data
+  url <- paste("https://www.bundesbank.de/statistic-rmi/StatisticDownload?tsId=",
+               key,
+               "&mode=its&its_csvFormat=en&its_currency=default&its_dateFormat=default&its_from=&its_to=",  sep="")
+  Bbk.Series <- read.csv(url, encoding="UTF-8", na.strings = c("."), skip=4,
+                         col.names = c("mydate", "obs_value", "obs_flag")) %>% 
+    filter(mydate != "") %>%
+    mutate(obs_value = as.numeric(obs_value),
+           var_id = tab_variables.tidy$var_id[tab_variables.tidy$var_sourcekey==key],
+           myfrequency = str_to_lower(str_sub(key, 7 ,7)),
+           obs_time = map2(myfrequency, mydate, createdatelist),
+           obs_vintage = Bbk.Description.EN$LastUpdate[Bbk.Description.EN$var_sourcekey==key]) %>% 
+    select(-myfrequency, -mydate)
+  Bbk.Untidy <- rbind(Bbk.Untidy, Bbk.Series)
+}
+
+# Put descriptions together
+tab_variables <- tab_variables.tidy %>% 
+  left_join(Bbk.Descriptions, by="var_sourcekey") %>% 
+  mutate(var_properties = map(var_sourcekey, createpropertylist),
+         var_properties = map(var_properties, addtolist, mykey="var_source", myvalue="Bundesbank"),
+         var_properties = map(var_properties, addtolist, mykey="var_type", myvalue="A"),
+         var_properties = map2(var_properties, var_description, addtolist, mykey="var_description"),
+         var_properties = map2(var_properties, var_dedescription, addtolist, mykey="var_dedescription"),
+         var_properties = map2(var_properties, var_unit, addtolist, mykey="var_unit"),
+         var_properties = map2(var_properties, var_unitmultiplier, addtolist, mykey="var_unitmultiplier")
+         ) %>% 
+  select(var_id, var_properties)
+
+# Write observations and variables to database
+tab_observations <- Bbk.Untidy %>% 
+  mutate(obs_vintage=as.Date(obs_vintage),
+         obs_trans="X") %>% 
+  select(var_id, obs_time, obs_value, obs_flag, obs_vintage, obs_trans)
+bbkVintage <- as.character(max(tab_observations$obs_vintage))
+FileName <- paste("DataBase/Bundesbank/Bbk_observations_", bbkVintage, ".rds", sep = "")
+saveRDS(tab_observations, file = FileName, compress = TRUE)
+
+FileName <- paste("DataBase/Bundesbank/Bbk_variables_", bbkVintage, ".rds", sep = "")
+saveRDS(tab_variables, file = FileName, compress = TRUE)
+
+# Clean memory
+rm(key, Bbk.Series, Bbk.Untidy, Bbk.Descriptions, Bbk.Description, Bbk.Description.DE,
+   Bbk.Description.EN, Bbk.Description.Untidy, tab_variables.tidy, FileName, url,
+   tab_observations, tab_variables, bbkVintage)
+```
+
+### Federal Statistical Office of Germany
+
+```{r download_genesis, include=FALSE, eval=FALSE}
+library(jsonlite)
+library(httr)
+
+# Load Genesis user credentials (user-specific)
+genesis_username <- Sys.getenv("GenesisUsername")
+genesis_password <- Sys.getenv("GenesisPassword")
+
+# Functions
+genesis_buildurl <- function(method, request){
+  # Transforms method and request list into url
+  for (parameter in names(request)) {
+    method <- stringr::str_replace(method, parameter, request[[parameter]])
+  }
+  return(method)
+}
+
+genesis_request <- function(url){
+  # Returns data for given url in JSON
+  request <- httr::GET(url)
+  request_text <- httr::content(request, "text")
+  request_json <- jsonlite::fromJSON(request_text, flatten=TRUE)
+  # print(request_json$Status)
+  return(request_json)
+}
+
+# Set up request
+genesis_table = "81000-0001"
+request <- c(genesis_username, genesis_password, genesis_table, "all", "false", "", "", "false")
+names(request) <- c("IHRE_KENNUNG", "IHR_PASSWORT", "TABELLE", "BEREICH", "TRANSPONIEREN", "STARTJAHR", "ENDJAHR", "JOB")
+methods <- list("https://www-genesis.destatis.de/genesisWS/rest/2020/helloworld/logincheck?username=IHRE_KENNUNG&password=IHR_PASSWORT&language=de",
+                "https://www-genesis.destatis.de/genesisWS/rest/2020/data/table?username=IHRE_KENNUNG&password=IHR_PASSWORT&name=TABELLE&area=BEREICH&compress=false&transpose=TRANSPONIEREN&startyear=STARTJAHR&endyear=ENDJAHR&timeslices=&regionalvariable=&regionalkey=&classifyingvariable1=&classifyingkey1=&classifyingvariable2=&classifyingkey2=&classifyingvariable3=&classifyingkey3=&job=JOB&stand=&language=de")
+names(methods) <- c("logincheck", "table")
+
+# Login check
+url <- genesis_buildurl(methods$logincheck, request)
+response <- genesis_request(url)
+
+# Load table
+url <- genesis_buildurl(methods$table, request)
+response <- genesis_request(url)
+
+# > convert to dataframe
+headers <- read.table(text = response$Object$Content, sep =";", header = FALSE, fill=TRUE, skip=5)
+df <- read.table(text = response$Object$Content, sep =";", header = FALSE, fill=TRUE, skip=7)
+colnames(df) <- c("date", "bin", headers[1,3:length(headers)])
+tab_observations.untidy <- df %>% 
+  filter(bin != "")
+
+df  %>% as_tibble()
+df2 <- as_tibble(response$Object$Content)
+
+
+```
+
+### ifo Business Surveys
+ifo Business Climate for Germany is provided as Excel file on the ifo website. Using the download.file command from the utils package, the Excel file can be downloaded directly from R. It then has to be rearranged to the IWH Macro Database format. The download command requires a method. This has to be found out by trial and error. In case of ifo, curl works, all other possible methods not.
+
+##### `r colorize("Example:", "green")` ifo Business Climate for Germany July 2021 {-}
+The July 2021 data can be found here: https://www.ifo.de/en/node/64322.
+
+##### Main ifo Data {-}
+The following code automatizes the download of the Excel file. The vintage has to be specified in the variable ifoVintage (10 Digits: YYYY-MM-DD).
+
+```{r download_ifo_business_climate, eval=FALSE}
+ifoVintage <- "2021-07-26"
+ifoMonth <- paste(str_sub(ifoVintage,1,4), str_sub(ifoVintage,6,7), sep="")
+
+# Download Excel file from ifo website
+url <- paste("https://www.ifo.de/sites/default/files/secure/timeseries/gsk-d-", ifoMonth, ".xlsx", sep = "")
+destfile <- paste(Root, "DataSources/ifo/gsk-d-", ifoMonth, ".xlsx", sep = "")
+download.file(url=url, destfile=destfile, method = "curl")
+
+# Read first sheet from Excel file
+ifo.Untidy <- read_excel(destfile, sheet="ifo Geschäftsklima Deutschland", skip=9,
+                         col_names = c("Date", "IFOK_SA", "IFOB_SA", "IFOE_SA", "IFOSALK_SA", "IFOSALB_SA", "IFOSALE_SA", "IFOUNS", "IFOAMPEL"))
+
+ifo.Monthly.1 <- ifo.Untidy %>%
+  mutate(obs_time = list(list(obs_frequency="m"))) %>% 
+  separate(Date, into=c("Month", "Year"), sep="/") %>%   
+  mutate(Date = as.yearmon(make_date(year=Year, month=Month)),
+         obs_time = map2(obs_time, Date, addtolist, mykey="obs_date")) %>% 
+  select(obs_time, everything(), -Month, -Year, -Date) %>% 
+  gather(key="var_id", value="obs_value", -obs_time)
+
+# Read second sheet from Excel file
+ifo.Untidy <- read_excel(destfile, sheet="Wirtschaftsbereiche", skip=8,
+                         col_types = c("text", "numeric", "numeric", "numeric", rep("skip",21)),
+                         col_names = c("Date", "IFOGWK_SA", "IFOVGW_SA", "IFOGWE_SA"))
+
+ifo.Monthly.2 <- ifo.Untidy %>% 
+  mutate(obs_time = list(list(obs_frequency="m"))) %>% 
+  separate(Date, into=c("Month", "Year"), sep="/") %>%   
+  mutate(Date = as.yearmon(make_date(year=Year, month=Month)),
+         obs_time = map2(obs_time, Date, addtolist, mykey="obs_date")) %>% 
+  select(obs_time, everything(), -Month, -Year, -Date) %>% 
+  gather(key="var_id", value="obs_value", -obs_time)
+
+# Combine the two Excel sheets in one tibble
+tab_observations <- rbind(ifo.Monthly.1, ifo.Monthly.2) %>% 
+  mutate(obs_flag = "",
+         obs_vintage = ifoVintage,
+         obs_trans = "X") %>% 
+  select(var_id, obs_time, obs_value, obs_flag, obs_vintage, obs_trans)
+  
+tab_variables <- tibble(var_id = unique(tab_observations$var_id)) %>% 
+  mutate(var_properties = list(list(source="ifo")),
+         var_properties = map(var_properties, addtolist, mykey="var_type", myvalue="A"))
+
+# Write data to database
+FileName <- paste("DataBase/ifo/ifo_observations_", ifoVintage, ".rds", sep = "")
+saveRDS(tab_observations, file = FileName, compress = TRUE)
+
+FileName <- paste("DataBase/ifo/ifo_variables_", ifoVintage, ".rds", sep = "")
+saveRDS(tab_variables, file = FileName, compress = TRUE)
+
+# Clear memory
+rm(ifo.Monthly.1, ifo.Monthly.2, ifo.Untidy, destfile, ifoMonth, url, FileName,
+   tab_observations, tab_variables, ifoVintage)
+```
+
+### Regional National Accounts Germany
+Regional national accounts (state and county level) are provided by the statistical offices ([VGRdL](https://www.statistikportal.de/de/vgrdl)).
+
+### Eurostat
+
+### European Central Bank
+
+### FRED
+
+### OECD
+
+### World Development Indicators
+
+### Penn World Table
+
+### World Input-Output Database
+
+### Datastream
+
+### United Nations Population Statistics
+```{r un_population, eval=FALSE}
+# Download data from UN website
+# https://population.un.org/wpp/Download/Standard/CSV/
+UNVintage = "2019-08-01"
+
+UN.Untidy <- read.csv("https://population.un.org/wpp/Download/Files/1_Indicators%20(Standard)/CSV_FILES/WPP2019_TotalPopulationBySex.csv", encoding="UTF-8")
+
+UN.Tidy <- UN.Untidy %>% 
+  select(cnt_isonum=LocID, everything(), -Location, -MidPeriod) %>% 
+  pivot_longer(cols=c("PopMale", "PopFemale", "PopTotal", "PopDensity"), names_to = "var_sourcekey", values_to = "obs_value") %>% 
+  left_join(tab_countries, by="cnt_isonum") %>%
+  mutate(obs_time = list(list(obs_frequency = "Y")),
+         obs_time = map2(obs_time, Time, addtolist, mykey="obs_date"),
+         obs_flag = "",
+         obs_vintage = UNVintage,
+         obs_trans = "X",
+         obs_mod = "OHR",
+         var_pradj = "X",
+         var_sadj = "X",
+         var_type = "F",
+         var_source = "UN") %>%
+  unite(var_id, var_sourcekey, VarID, sep="", remove = FALSE) %>% 
+  unite(var_id, var_id, var_pradj, var_sadj, var_type, var_source, cnt_code2) 
+
+tab_observations <-  UN.Tidy %>% 
+  select(var_id, obs_time, obs_value, obs_flag, obs_vintage, obs_mod, obs_trans)
+
+tab_descriptions <- tribble(
+  ~var_sourcekey, ~var_shortdescription,
+  "PopMale", "Total male population (thousands)",
+  "PopFemale", "Total female population (thousands)",
+  "PopTotal", "Total population (thousands)",
+  "PopDensity", "Population per square kilometre (thousands)"
+)
+
+tab_variables <- UN.Tidy %>% 
+  distinct(var_id, .keep_all = TRUE) %>% 
+  left_join(tab_descriptions, by = "var_sourcekey") %>%
+  mutate(sep1=" (",
+         sep2=")",
+         var_properties=list(list(var_units=1000))) %>% 
+  unite(var_description, var_shortdescription, sep1, Variant, sep2, sep = "") %>% 
+  mutate(var_properties=map2(var_properties, var_description, addtolist, mykey="var_description"),
+         var_properties=map2(var_properties, var_sourcekey, addtolist, mykey="var_sourcekey"),
+         var_properties=map2(var_properties, VarID, addtolist, mykey="var_UNVarID")) %>% 
+  select(var_id, var_properties)
+
+# Write data to database
+FileName <- paste("DataBase/UN/UN_observations_", UNVintage, ".rds", sep = "")
+saveRDS(tab_observations, file = FileName, compress = TRUE)
+
+FileName <- paste("DataBase/UN/UN_variables_", UNVintage, ".rds", sep = "")
+saveRDS(tab_variables, file = FileName, compress = TRUE)
+
+# Clear memory
+rm(tab_descriptions, UN.Tidy, UN.Untidy,
+   tab_observations, tab_variables, UNVintage)
+```
+
+## Special Purpose Sources
+### Google Mobility Data
+
+### CSSE Data on Global Infections
+```{r download_csss, eval=FALSE}
+# Source: https://github.com/CSSEGISandData/COVID-19/tree/master/csse_covid_19_data/csse_covid_19_time_series
+CSSEVintage = "2021-08-20"
+
+# Download data from Github
+spathGithubRepository = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/"
+lFileNames = c("csse_covid_19_time_series/time_series_covid19_confirmed_global.csv",
+               "csse_covid_19_time_series/time_series_covid19_deaths_global.csv",
+               "csse_covid_19_time_series/time_series_covid19_recovered_global.csv")
+CSSE.Untidy = NULL
+for(sFileName in lFileNames){
+  # download csv file from github
+  sPathURl = paste(spathGithubRepository, sFileName, sep = "")
+  CSSE.Untidy = c(CSSE.Untidy,list(read.csv(sPathURl)))
+}
+names(CSSE.Untidy) = c("Confirmed", "Deaths", "Recovered")
+
+# Make data tidy: Confirmed
+Confirmed <- CSSE.Untidy$Confirmed %>%
+  rename(Province = `Province.State`,
+         Country = `Country.Region`) %>% 
+  select(-Lat, -Long) %>%
+  gather(key = "Day", value = "Confirmed", -Province, -Country) %>%
+  separate(Day, into=c(NA,"Day"), sep=1) %>%
+  mutate(Day = as_date(Day, format = "%m.%d.%y")) %>% 
+  group_by(Country, Day) %>%
+  summarise(Confirmed = sum(Confirmed, na.rm = TRUE), .groups = "drop") %>%
+  ungroup() %>%
+  mutate(cnt_name = as.character(Country),
+         cnt_name = ifelse(cnt_name == "Mainland China", "China", cnt_name),
+         cnt_name = ifelse(cnt_name == "Korea, South", "South Korea", cnt_name),
+         cnt_name = ifelse(cnt_name == "Iran (Islamic Republic of)", "Iran", cnt_name),
+         cnt_name = ifelse(cnt_name == "Congo (Brazzaville)", "Congo", cnt_name),
+         cnt_name = ifelse(cnt_name == "Congo (Kinshasa)", "Democratic Republic of the Congo", cnt_name),
+         cnt_name = ifelse(cnt_name == "Taiwan*", "Taiwan", cnt_name),
+         cnt_name = ifelse(cnt_name == "Burma", "Myanmar", cnt_name),
+         cnt_name = ifelse(cnt_name == "US", "United States", cnt_name)) %>% 
+  left_join(tab_countries, by = "cnt_name") %>% 
+  drop_na(cnt_code2) %>%
+  mutate(var_id = "COV19CON",
+         var_pradj = "X",
+         var_sadj = "X",
+         var_type = "A",
+         var_source = "CSSE",
+         obs_time = list(list(obs_frequency="D")),
+         obs_time = map2(obs_time, Day, addtolist, mykey="obs_date"),
+         obs_flag = "",
+         obs_vintage = as.Date(CSSEVintage),
+         obs_mod = "OHR",
+         obs_trans = "X") %>% 
+  unite(var_id, var_id, var_pradj, var_sadj, var_type, var_source, cnt_code2) %>% 
+  select(var_id, obs_time, obs_value=Confirmed, obs_flag, obs_vintage, obs_mod, obs_trans)
+
+
+```
+
+### Oxford COVID Policy Tracker
+
+### COVID Vaccination Data (Our World in Data)
+
+### AMADEUS/ORBIS Financials
+
+## IWH (and other) Forecasts
+
+### Data from "Entwurf Verwendung"
+Previous IWH forecasts have been stored on the G: network drive as Excel files. Quarterly GDP and components are stored in a file Entwurf-Verwendung.xlsx. 
+
+```{r entwurf_verwendung, eval=FALSE}
+# Setup -----
+DataPath <- "DataSources/IWH/"
+
+FileName <- paste(DataPath,"IWH-Prognosen",".xlsx",sep="")
+IWHForecastsPlain <- read_excel(FileName,
+                                sheet="IWH-Prognosen",
+                                col_types = c("numeric",
+                                              "numeric",
+                                              "date",
+                                              "numeric",
+                                              "numeric",
+                                              "numeric"))
+
+IWHForecasts <- IWHForecastsPlain %>% 
+  mutate(PID = str_c(str_sub(Year,3,4), str_pad(Number, width = 2, side= "left", pad = "0")))
+
+# Read from RDS ----  
+FileName <- paste(DataPath,"IWH-ForecastDB",".rds",sep="")
+ForecastDB.Clean <- readRDS(FileName)
+
+tab_variables <- ForecastDB.Clean %>%
+  select(-starts_with("pch.")) %>% 
+  pivot_longer(!c(PID, QuarterNum, Type), names_to = "Var", values_to = "Values") %>% 
+  arrange(PID, Var, Type, QuarterNum) %>% 
+  group_by(PID, Var, Type) %>% 
+  distinct(PID, Var, Type) %>% 
+  ungroup() %>% 
+  mutate(Source = "IWHF",
+         Type = ifelse(Type=="Actual", "A", "F")) %>% 
+  unite(Source, Source, PID, sep="") %>% 
+  unite(var_id, Var, Source, Type, remove = FALSE) %>% 
+  mutate(var_properties = list(list(var_country="Germany")),
+         var_properties = map2(var_properties, Source, addtolist, mykey="var_source"),
+         var_properties = map2(var_properties, Type, addtolist, mykey="var_type")) %>% 
+  select(var_id, var_properties)
+
+tab_observations <- ForecastDB.Clean %>% 
+  select(-starts_with("pch.")) %>% 
+  pivot_longer(!c(PID, QuarterNum, Type), names_to = "Var", values_to = "obs_value") %>%
+  left_join(IWHForecasts, by = "PID") %>% 
+  select(-Year, -Number, -starts_with("da_")) %>% 
+  mutate(QuarterNum = as.yearmon(QuarterNum),
+         obs_time = list(list(obs_frequency="q")),
+         obs_time = map2(obs_time, QuarterNum, addtolist, mykey="obs_date"),
+         Source = "IWHF",
+         Type = ifelse(Type=="Actual", "A", "F"),
+         obs_flag = "") %>% 
+  unite(Source, Source, PID, sep="") %>% 
+  unite(var_id, Var, Source, Type) %>% 
+  select(var_id, obs_time, obs_value, obs_flag, obs_vintage=Date)
+
+IWHVintage = as.character(max(tab_observations$obs_vintage))
+
+# Write data to database
+FileName <- paste("DataBase/IWH/IWH_observations_", IWHVintage, ".rds", sep = "")
+saveRDS(tab_observations, file = FileName, compress = TRUE)
+
+FileName <- paste("DataBase/IWH/IWH_variables_", IWHVintage, ".rds", sep = "")
+saveRDS(tab_variables, file = FileName, compress = TRUE)
+
+# Clear memory
+rm(DataPath, IWHForecasts, IWHForecastsPlain, ForecastDB.Clean, FileName, tab_observations, tab_variables, IWHVintage)
+```
+
+## New Data Sources
+* Open table (restaurant visits), correlated with turnover in the services sector, see Commerzbank Research
+
+# User Interface
+## Visualizing Data: IWH Business Cycle Dashboard
+A powerful tool for interactive data presentation is R-Shiny (https://shiny.rstudio.com/). It can be used to build dashboards.
+
+## Exporting Data for Use in Excel, EViews or other Software
+
+# Documentation
+The documentation is organized as R Markdown (a format for writing reproducible, dynamic reports with R). Basic guides are @XieAllaireGrolemund2021 and @XieDervieuxRiederer2021. The R Markdown Cheat Sheet is a good reference (in RStudio: Help -> Cheat Sheets).
+
+# Forecasting Work-flow
+R and R Markdown can also be used to automatize the forecasting workflow. A MS word file including standard charts can be produced with R Markdown.
+
+## Forecasting Schedule
+
+## Responsibilities
+
+# Open Questions
+* Is the data structure reasonable?
+* How to organize the rds/csv files?
+    + By source? Because download is organized by source storage by source could be a reasonable approach.
+    + By frequency?
+    + By subject?
+    + ...
+* How to organize multiple user modifications of rds-files?
+    + One central database maintained by an administrator? Mirrored on individual drives?
+    + Augmented by local rds/csv-files with individual data?
+* Stable environment
+    + Robustness in case of new R version (package renv)
+
+# References
