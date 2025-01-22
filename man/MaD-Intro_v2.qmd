@@ -1,0 +1,208 @@
+---
+title: "IWH Macroeconomic Database"
+author: "IWH Macroeconomics Department"
+format: html
+bibliography: MaD-Lit.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+rm(list=ls())
+
+# Auxiliary Functions -----
+colorize <- function(x, color) {
+  if (knitr::is_latex_output()) {
+    sprintf(x)
+    # sprintf("\\textcolor{%s}{%s}", color, x)
+  } else if (knitr::is_html_output()) {
+    sprintf("<span style='color: %s;'>%s</span>", color,
+      x)
+  } else x
+}
+
+addtolist <- function(mylist, myvalue, mykey){
+  mylist[[mykey]] <- myvalue
+  return(mylist)
+}
+```
+
+`r colorize("**This document is for internal use only. Do not distribute it outside IWH!**", "red")`
+
+# Introduction
+## Why a New Data Infrastructure?
+The current data infrastructure of the Macroeconomics Department is out-of-date.
+
+* Data is stored in multiple Excel files in multiple directories, sometimes even in personal directories which cannot be accessed by others.
+* It is difficult to use various vintages of data.
+* Many data sets are linked in Excel which is a possible source of errors.
+
+The new data infrastructure will be used to improve the efficiency of the forecasting workflow and to make actual data and forecasts available for research.
+
+## What Should the New Infrastructre Do?
+**Criteria** that a new infrastructure should fulfill are:
+
+* Transparency (well documented)
+* Easy access and search for variables
+* Avoid double work and redundancies (shared data)
+* Extendibility
+* Accessibility (also on non-IWH computers)
+* Compatible with any statistical or econometric software
+* Combine external data sources and IWH data (previous forecasts, e.g.)
+* Real-time functionality
+* Local storage of essential data (national accounts, business cycle indicators)
+* Reproducibility
+* Simulation environment: various alternative model solutions
+* Main functionality with free software (like R)
+
+## Prerequisites
+### R
+A basic understanding of R is required. A good introduction is @GrolemundWickham2016.
+
+#### R-Studio
+RStudio ([www.rstudio.com](https://www.rstudio.com)) offers a convenient environment to work with R. RStudio is free software and can be downloaded and used on private computers. It is available on the IWHSNC server.
+
+#### R Packages
+Functions for many purposes are provided as *packages*. These packages must be installed and loaded before the functions can be used. The command for loading a package is library().
+
+Packages that are used very often for data management and analysis are:
+
+* tidyverse
+* lubridate
+* readxl
+* scales
+* zoo
+* utils
+
+```{r packages, message=FALSE, warning=FALSE, results='hide'}
+library(tidyverse)
+library(lubridate)
+library(readxl)
+library(scales)
+library(zoo)
+library(utils)
+```
+
+#### Additional Beginner's Resources
+
+* @ZuurIenoMeesters2009
+
+# Database Structure and Storage
+## Main Principles
+The basic item of the **IWH Macroeconomic Database (IWH-MaD)** is an *observation* of a *variable*. 
+
+Variables are organized in a table `r colorize("tab_variables", "blue")` with columns:
+
+* `r colorize("var_id", "blue")`: the primary key
+* `r colorize("var_porperties", "blue")`: a *named list*
+    + var_name: English (short) name of the variable, used in tables and figures
+    + var_dename: German (short) name of the variable
+    + var_description
+    + var_dedescription
+    + var_units
+    + var_currency
+    + var_dimension
+    + var_baseyear
+    + var_aggregation
+    + var_originalsource
+    + var_sourcekey
+
+The table `r colorize("tab_observations", "blue")` has the following columns:
+
+* `r colorize("var_id", "blue")`
+* `r colorize("obs_value:", "blue")` the value
+* `r colorize("obs_time:", "blue")` the date and frequency to which the value refers stored in a *named list* with elements
+    + `r colorize("obs_date", "blue")`
+* `r colorize("obs_vintage", "blue")`: the vintage date
+* `r colorize("obs_update", "blue")`: the date of last change
+* `r colorize("obs_flag", "blue")`
+* `r colorize("obs_mod", "blue")`: a string indicating the *owner* (necessary to distinguish between local user-specific and central data)
+* `r colorize("obs_trans", "blue")`
+    + none (X)
+    + log (L)
+    + year-on-year percentage change (Y)
+    + percentage change (C)
+
+The data format for a table is a **tibble** (similar to a dataframe). The tables are stored in *rds*-files (a native R file format which compresses data and cannot be read by other software). From R, data can easily be stored in *csv*-files which can be imported into other software.^[Date is not directly stored as csv-files because it is not *tidy* but hierarchical: Some fields contain a variable number of elements in lists.] Tibbles can be created with tibble() or tribble(). Tables imported from csv or Excel file are also tibbles.
+
+##### `r colorize("Example:", "green")` Industrial Production from Bundesbank {-}
+```{r exmpl_ip_de_sa_00}
+tab_variables <- tribble(
+  ~var_id, ~var_properties,
+  "IP_SA_DE", list(var_sourcekey="BBDE1.M.DE.Y.BAA1.A2P000000.G.C.I15.A",
+                   var_name="Production"),
+  "IPIND_SA_DE", list(var_sourcekey="BBDE1.M.DE.Y.BAA1.A2P300000.G.C.I15.A")
+)
+
+print(tab_variables)
+```
+
+## Structure of the Primary Key var_id
+The primary key var_id identifies the variable. It consists of at least six segments separated by a underscore (_). The segments are:
+
+(@) Mnemonic: a short string like GDP, CONS, INV, IP, ...
+(@) Frequency:
+    + daily (D)
+    + weekly, 7 days (W)
+    + weekly, 5 days (V)
+    + monthly (M)
+    + quarterly (Q)
+    + bi-annual (B)
+    + yearly (Y)
+(@) Price-adjustment identifier (see above)
+    + no adjustment (X)
+    + current prices (C)
+    + price-adjusted, chain-linked, normalized to 100 (L)
+    + volume  (V)
+    + unchained volume (U)
+    + deflator (P)
+(@) Seasonal adjustment
+    + no adjustment (X)
+    + seasonally and calendar adjusted (ARIMA-13) (A)
+    + seasonally and calendar adjusted (BV4) (B)
+    + seasonally adjusted (ARIMA-13) (S)
+    + seasonally adjusted (BV4) (V)
+    + calendar adjusted (C)
+    + season factors (F)
+    + calendar factors (T)
+(@) Type
+    + actual value (A)
+    + point forecast (F)
+(@) Source: the src_id, see below
+(@) Country: ISO country code (2-digit), see https://en.wikipedia.org/wiki/List_of_ISO_3166_country_codes 
+
+DE - Germany (since 1991)
+DC - Germany (chained before 1991 and after)
+DW - West Germany (before 1991)
+
+If necessary, var_id can be extended by additional segments, referring to a subregion of a country (NUTS 2, NUTS 3, ...) or to various currencies, e.g.
+
+Where needed, the var_id segments can be added as elements to var_properties (var_priceadj, var_seasadj, var_type, src_id). 
+
+## Database Meta Data
+Meta data is stored in an Exel file `r colorize("MaD-Meta.xlsx", "blue")`. This file contains the following sheets (columns below sheet name, respectively):
+
+* `r colorize("tab_sources", "blue")`: information on data sources
+  + src_id (primary key)
+  + src_name
+  + src_dename
+* `r colorize("tab_keys", "blue")`: information on data sources
+  + var_id (primary key)
+  + var_name
+  + var_dename
+  + var_sourcekey
+* `r colorize("tab_countries", "blue")`: information on countries
+    + cnt_code2: 2-digit ISO country code (primary key)
+    + cnt_name: English (short) name of country, used in standard work, in many cases the official name of country
+    + cnt_fullname: English full (official) name of country (United Kingdom of Great Britain and Northern Ireland, e.g.)
+    + cnt_code3: 3-digit country code
+    + cnt_dscode: Datastream country code (BD for Germany, e.g.)
+    + cnt_eucode: Eurostat country code (EL for Greece, e.g.)
+    + cnt_dename: German (short) name of country
+    + cnt_defullname: German full name of country
+    + cur_iso: main national currency
+* `r colorize("tab_currencies", "blue")`: information on currencies
+    + cur_iso: 3-digit currency code (primary key)
+    + cur_name
+    + cur_dename
+    
