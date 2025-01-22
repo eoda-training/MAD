@@ -1,6 +1,7 @@
 ---
 title: "IWH Macroeconomic Database"
 author: "IWH Macroeconomics Department"
+date: today
 format: html
 bibliography: MaD-Lit.bib
 ---
